@@ -5,6 +5,8 @@
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
+// @updateURL    https://github.com/wonsh/RKEnhancer/raw/refs/heads/main/RKenhancer.user.js
+// @downloadURL  https://github.com/wonsh/RKEnhancer/raw/refs/heads/main/RKenhancer.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // ==/UserScript==
