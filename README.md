@@ -16,7 +16,7 @@ A Tampermonkey userscript that enhances the [Renaissance Kingdoms](https://www.r
    - Safari: [Tampermonkey for Safari](https://www.tampermonkey.net/?browser=safari)
 
 2. **Install the Script**
-   - Click this link: **[Install Renaissance Kingdoms Helper](https://github.com/wonsh/RKEnhancer/blob/main/RKenhancer.user.js)**  
+   - Click this link: **[Install Renaissance Kingdoms Helper](https://github.com/wonsh/RKEnhancer/raw/refs/heads/main/RKenhancer.user.js)**  
    - Tampermonkey will open an installation prompt. Click **Install**.
 
 3. **Enjoy the Enhancements**
