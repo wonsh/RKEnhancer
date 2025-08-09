@@ -396,7 +396,17 @@
     // Function to create the transfer button in legend table
     function createTransferUI() {
         const legendTable = document.querySelector('table.table_legende');
+    
         if (!legendTable || document.getElementById('bulk-transfer-row')) return;
+    
+        const parentDiv = legendTable.closest('div.illustrationImage');
+    
+        if (!parentDiv) return; // no matching parent div found
+    
+        // Ensure it has 'legendeEvenement' and does NOT have 'legendeMarche'
+        if (!parentDiv.classList.contains('legendeEvenement') || parentDiv.classList.contains('legendeMarche')) {
+            return;
+        }
 
         // Create new row for bulk transfer
         const row = document.createElement('tr');
