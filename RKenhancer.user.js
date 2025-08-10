@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
@@ -570,4 +570,163 @@
 
     // Start all functionality
     setTimeout(initBulkTransfer, 1000);
+
+ 
+// add header sorting functionality in inventory, property and market
+let sortDirection = {
+    qty: 1,
+    name: 1,
+    weight: 1,
+    marketName: 1,
+    marketPrice: 1,
+    marketQty: 1
+};
+
+function sortItems(key, selector, isNumeric, containerSelector) {
+    let container = document.querySelector(containerSelector);
+    if (!container) return;
+
+    let allRows = Array.from(container.querySelectorAll(selector));
+    if (!allRows.length) return;
+
+    let parent = allRows[0].parentNode;
+
+    allRows.sort((a, b) => {
+        let aVal = a.textContent.trim();
+        let bVal = b.textContent.trim();
+
+        if (isNumeric) {
+            aVal = parseFloat(aVal.replace(",", ".")) || 0;
+            bVal = parseFloat(bVal.replace(",", ".")) || 0;
+        } else {
+            aVal = aVal.toLowerCase();
+            bVal = bVal.toLowerCase();
+        }
+
+        if (aVal < bVal) return -1 * sortDirection[key];
+        if (aVal > bVal) return 1 * sortDirection[key];
+        return 0;
+    });
+
+    sortDirection[key] *= -1;
+
+    allRows.forEach(row => parent.appendChild(row));
+}
+
+// === INVENTORY ===
+function makeInventoryHeaderClickable(text, key, selector, isNumeric) {
+    let header = Array.from(document.querySelectorAll(".inventaire_contenu_01 b"))
+        .find(el => el.textContent.trim() === text);
+    if (header && !header.dataset.sortBound) {
+        header.style.cursor = "pointer";
+        header.title = "Click to sort";
+        header.dataset.sortBound = "1";
+        header.addEventListener("click", () => sortInventory(key, selector, isNumeric));
+    }
+}
+
+function sortInventory(key, selector, isNumeric) {
+    let allItems = Array.from(document.querySelectorAll(".ConteneurItem"));
+    if (!allItems.length) return;
+
+    let items = allItems.filter(el => {
+        let nbreText = el.querySelector(".inventaire_contenu_01_nbre")?.textContent.trim() || "";
+        let isHeader = nbreText === "#" || nbreText === "";
+        let isMoney = el.classList.contains("item_inventaire_ecu");
+        return !isHeader && !isMoney;
+    });
+
+    let parent = allItems[0].parentNode;
+
+    items.sort((a, b) => {
+        let aVal = a.querySelector(selector)?.textContent.trim() || "";
+        let bVal = b.querySelector(selector)?.textContent.trim() || "";
+
+        if (isNumeric) {
+            aVal = parseFloat(aVal.replace(",", ".")) || 0;
+            bVal = parseFloat(bVal.replace(",", ".")) || 0;
+        } else {
+            aVal = aVal.toLowerCase();
+            bVal = bVal.toLowerCase();
+        }
+
+        if (aVal < bVal) return -1 * sortDirection[key];
+        if (aVal > bVal) return 1 * sortDirection[key];
+        return 0;
+    });
+
+    sortDirection[key] *= -1;
+
+    allItems.forEach(el => {
+        if (!items.includes(el)) parent.appendChild(el);
+    });
+    items.forEach(item => parent.appendChild(item));
+}
+
+// === MARKET ===
+function makeMarketHeaderClickable(text, key, colIndex, isNumeric) {
+    let header = document.querySelector(`#zoneTexte0 table tr:first-child td:nth-child(${colIndex}) strong`);
+    if (header && header.textContent.trim() === text && !header.dataset.sortBound) {
+        header.style.cursor = "pointer";
+        header.title = "Click to sort";
+        header.dataset.sortBound = "1";
+        header.addEventListener("click", () => sortMarket(key, colIndex, isNumeric));
+    }
+}
+
+function sortMarket(key, colIndex, isNumeric) {
+    let table = document.querySelector("#zoneTexte0 table");
+    if (!table) return;
+
+    let rows = Array.from(table.querySelectorAll("tr")).slice(1); // skip header
+    let parent = rows[0]?.parentNode;
+    if (!rows.length) return;
+
+    rows.sort((a, b) => {
+        let aVal = a.querySelector(`td:nth-child(${colIndex})`)?.textContent.trim() || "";
+        let bVal = b.querySelector(`td:nth-child(${colIndex})`)?.textContent.trim() || "";
+
+        if (isNumeric) {
+            aVal = parseFloat(aVal.replace(",", ".")) || 0;
+            bVal = parseFloat(bVal.replace(",", ".")) || 0;
+        } else {
+            aVal = aVal.toLowerCase();
+            bVal = bVal.toLowerCase();
+        }
+
+        if (aVal < bVal) return -1 * sortDirection[key];
+        if (aVal > bVal) return 1 * sortDirection[key];
+        return 0;
+    });
+
+    sortDirection[key] *= -1;
+    rows.forEach(r => parent.appendChild(r));
+}
+
+function applySortingHeaders() {
+    // Inventory
+    makeInventoryHeaderClickable("#", "qty", ".inventaire_contenu_01_nbre", true);
+    makeInventoryHeaderClickable("Nazwa", "name", ".inventaire_contenu_01_descriptif", false);
+    makeInventoryHeaderClickable("Masa", "weight", ".inventaire_contenu_01_poids", true);
+
+    // Market
+    makeMarketHeaderClickable("Nazwa", "marketName", 2, false);
+    makeMarketHeaderClickable("Cena", "marketPrice", 3, true);
+    makeMarketHeaderClickable("Ilość", "marketQty", 4, true);
+}
+
+// Initial bind
+applySortingHeaders();
+
+// Watch for changes
+const observer = new MutationObserver(() => {
+    applySortingHeaders();
+});
+
+observer.observe(document.body, {
+    childList: true,
+    subtree: true
+});
+
+
 })();
