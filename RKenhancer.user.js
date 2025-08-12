@@ -1,21 +1,111 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      2.0
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
-// @updateURL    https://github.com/wonsh/RKEnhancer/raw/refs/heads/main/RKenhancer.user.js
-// @downloadURL  https://github.com/wonsh/RKEnhancer/raw/refs/heads/main/RKenhancer.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        unsafeWindow
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // Add custom CSS for all features
-    GM_addStyle(`
+    // ============ CONFIGURATION ============
+    const CONFIG = {
+        DELAYS: {
+            ELEMENT_WAIT: 100,
+            TRANSFER_DELAY: 100,
+            IFRAME_CHECK: 500,
+            INIT_DELAY: 1000
+        },
+        SELECTORS: {
+            MARKET_LEGEND: 'div.illustrationImage.legendeEvenement.legendeMarche',
+            INVENTORY_PANEL: '.popupEcranRR_ecranInventaire',
+            CURRENT_ITEMS_LEGEND: 'div.illustrationImage.legendeEvenement:not(.legendeMarche)',
+            RACINE_POPUP: '#racinePopup',
+            INVENTORY_ITEMS: '.ConteneurItem.bas',
+            MARKET_TABLE: '#zoneTexte0 table',
+            LEGEND_TABLE: 'table.table_legende'
+        }
+    };
+
+    // ============ UTILITY FUNCTIONS ============
+    const Utils = {
+        waitForElement(selector, callback, timeout = 5000) {
+            const startTime = Date.now();
+            const checkElement = () => {
+                const element = document.querySelector(selector);
+                if (element) {
+                    callback(element);
+                } else if (Date.now() - startTime < timeout) {
+                    setTimeout(checkElement, CONFIG.DELAYS.ELEMENT_WAIT);
+                }
+            };
+            checkElement();
+        },
+
+        createElement(tag, options = {}) {
+            const element = document.createElement(tag);
+            if (options.className) element.className = options.className;
+            if (options.textContent) element.textContent = options.textContent;
+            if (options.style) element.style.cssText = options.style;
+            if (options.attributes) {
+                Object.entries(options.attributes).forEach(([key, value]) => {
+                    element.setAttribute(key, value);
+                });
+            }
+            return element;
+        },
+
+        addStyles(styles) {
+            // Fallback for Safari if GM_addStyle doesn't work
+            if (typeof GM_addStyle === 'function') {
+                GM_addStyle(styles);
+            } else {
+                const styleElement = document.createElement('style');
+                styleElement.textContent = styles;
+                document.head.appendChild(styleElement);
+            }
+        },
+
+        makeHttpRequest(options) {
+            // Fallback for Safari if GM_xmlhttpRequest doesn't work
+            if (typeof GM_xmlhttpRequest === 'function') {
+                return new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        ...options,
+                        onload: resolve,
+                        onerror: reject
+                    });
+                });
+            } else {
+                // Fallback to fetch for Safari
+                return fetch(options.url, {
+                    method: options.method || 'GET',
+                    headers: options.headers || {},
+                    body: options.data
+                });
+            }
+        },
+
+        debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    };
+
+    // ============ STYLES ============
+    const STYLES = `
         /* Search filter styles */
         .rk-search-container, .rk-inventory-search-container, .rk-current-search-container {
             margin: 5px 0;
@@ -69,63 +159,70 @@
             color: #666;
             margin-top: 3px;
         }
-    `);
 
-    // ============ UTILITY ============
-
-    function waitForElement(selector, callback) {
-        const element = document.querySelector(selector);
-        if (element) {
-            callback(element);
-        } else {
-            setTimeout(() => waitForElement(selector, callback), 100);
+        /* Sortable headers */
+        .sortable-header {
+            cursor: pointer !important;
+            user-select: none;
         }
-    }
+        .sortable-header:hover {
+            text-decoration: underline;
+        }
+        .sortable-header::after {
+            content: " ↕";
+            font-size: 0.8em;
+            opacity: 0.5;
+        }
+    `;
 
-    // ============ MARKET SEARCH ============
+    // ============ SEARCH FUNCTIONALITY ============
+    const SearchManager = {
+        createSearchContainer() {
+            const container = Utils.createElement('div', {
+                className: 'rk-search-container',
+                style: 'margin-top: 10px; padding: 5px;'
+            });
 
-    function addSearchBoxToDocument(doc = document) {
-        const targetElement = doc.querySelector('div.illustrationImage.legendeEvenement.legendeMarche');
-        if (!targetElement || targetElement.parentNode.querySelector('.rk-search-container')) return;
+            const input = Utils.createElement('input', {
+                attributes: {
+                    type: 'text',
+                    placeholder: 'Search...'
+                },
+                style: 'width: 100%; padding: 5px; border: 1px solid #999; border-radius: 3px; font-size: 12px;'
+            });
 
-        const searchContainer = doc.createElement('div');
-        searchContainer.className = 'rk-search-container';
-        searchContainer.style.cssText = `
-            margin-top: 10px;
-            padding: 5px;
-        `;
+            const clearButton = Utils.createElement('button', {
+                textContent: 'Clear',
+                style: 'margin-left: 0px; padding: 0px 5px; background-color: #e0e0e0; border: 1px solid #999; border-radius: 3px; cursor: pointer; font-size: 12px;'
+            });
 
-        const searchInput = doc.createElement('input');
-        searchInput.type = 'text';
-        searchInput.placeholder = 'Search...';
-        searchInput.style.cssText = `
-            width: 100%;
-            padding: 5px;
-            border: 1px solid #999;
-            border-radius: 3px;
-            font-size: 12px;
-        `;
+            container.appendChild(document.createTextNode('Filter: '));
+            container.appendChild(input);
+            container.appendChild(clearButton);
 
-        const clearButton = doc.createElement('button');
-        clearButton.textContent = 'Clear';
-        clearButton.style.cssText = `
-            margin-left: 0px;
-            padding: 0px 5px;
-            background-color: #e0e0e0;
-            border: 1px solid #999;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-        `;
+            return { container, input, clearButton };
+        },
 
-        searchContainer.appendChild(doc.createTextNode('Filter: '));
-        searchContainer.appendChild(searchInput);
-        searchContainer.appendChild(clearButton);
+        addMarketSearch(doc = document) {
+            const targetElement = doc.querySelector(CONFIG.SELECTORS.MARKET_LEGEND);
+            if (!targetElement || targetElement.parentNode.querySelector('.rk-search-container')) return;
 
-        targetElement.parentNode.insertBefore(searchContainer, targetElement.nextSibling);
+            const { container, input, clearButton } = this.createSearchContainer();
+            targetElement.parentNode.insertBefore(container, targetElement.nextSibling);
 
-        function filterTable() {
-            const searchTerm = searchInput.value.toLowerCase().trim();
+            const debouncedFilter = Utils.debounce(() => this.filterMarketTable(doc, input.value), 150);
+
+            input.addEventListener('input', debouncedFilter);
+            input.addEventListener('keyup', debouncedFilter);
+            clearButton.addEventListener('click', () => {
+                input.value = '';
+                this.filterMarketTable(doc, '');
+                input.focus();
+            });
+        },
+
+        filterMarketTable(doc, searchTerm) {
+            const term = searchTerm.toLowerCase().trim();
             const textZone = doc.getElementById('zoneTexte0');
             if (!textZone) return;
 
@@ -138,202 +235,110 @@
                 const nameCell = row.querySelector('td:nth-child(2)');
                 if (nameCell) {
                     const itemName = nameCell.textContent.toLowerCase().trim();
-                    row.style.display = (searchTerm === '' || itemName.includes(searchTerm)) ? '' : 'none';
+                    row.style.display = (term === '' || itemName.includes(term)) ? '' : 'none';
                 } else {
-                    row.style.display = searchTerm === '' ? '' : 'none';
+                    row.style.display = term === '' ? '' : 'none';
                 }
             });
-        }
+        },
 
-        searchInput.addEventListener('input', filterTable);
-        searchInput.addEventListener('keyup', filterTable);
-        clearButton.addEventListener('click', () => {
-            searchInput.value = '';
-            filterTable();
-            searchInput.focus();
-        });
-    }
+        addInventorySearch() {
+            const racinePopup = document.getElementById('racinePopup');
+            const inventoryPanel = racinePopup?.querySelector(CONFIG.SELECTORS.INVENTORY_PANEL);
+            if (!inventoryPanel) return;
 
-    waitForElement('div.illustrationImage.legendeEvenement.legendeMarche', () => {
-        addSearchBoxToDocument(document);
-    });
+            const header = inventoryPanel.querySelector('.encart_entete');
+            if (!header || header.querySelector('.rk-inventory-search-container')) return;
 
-    function checkIframes() {
-        const iframes = document.querySelectorAll('iframe');
-        iframes.forEach(iframe => {
-            try {
-                iframe.addEventListener('load', () => {
-                    try {
-                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                        if (iframeDoc.querySelector('div.illustrationImage.legendeEvenement.legendeMarche')) {
-                            addSearchBoxToDocument(iframeDoc);
-                        }
-                    } catch (e) {
-                        console.log('Cannot access iframe content (cross-origin)');
-                    }
-                });
-
-                if (iframe.contentDocument) {
-                    const iframeDoc = iframe.contentDocument;
-                    if (iframeDoc.querySelector('div.illustrationImage.legendeEvenement.legendeMarche')) {
-                        addSearchBoxToDocument(iframeDoc);
-                    }
-                }
-            } catch (e) {
-                console.log('Cannot access iframe content (cross-origin)');
-            }
-        });
-    }
-
-    setTimeout(checkIframes, 1000);
-
-    const iframeObserver = new MutationObserver(mutations => {
-        mutations.forEach(mutation => {
-            mutation.addedNodes.forEach(node => {
-                if (node.nodeType === 1 && node.tagName === 'IFRAME') {
-                    setTimeout(() => {
-                        try {
-                            const iframeDoc = node.contentDocument || node.contentWindow.document;
-                            if (iframeDoc.querySelector('div.illustrationImage.legendeEvenement.legendeMarche')) {
-                                addSearchBoxToDocument(iframeDoc);
-                            }
-                        } catch (e) {
-                            console.log('Cannot access iframe content (cross-origin)');
-                        }
-                    }, 500);
-                }
+            const searchContainer = Utils.createElement('div', {
+                className: 'rk-inventory-search-container',
+                style: 'position: absolute; right: 10px; top: 0px; margin: 0px 0; padding: 5px;'
             });
-        });
-    });
 
-    iframeObserver.observe(document.body, { childList: true, subtree: true });
+            const searchInput = Utils.createElement('input', {
+                attributes: {
+                    type: 'text',
+                    placeholder: 'Filter...'
+                },
+                style: 'height: 24px; width: 30%; padding: 4px; font-size: 12px;'
+            });
 
-    // ============ INVENTORY FILTER ============
+            const clearButton = Utils.createElement('button', {
+                textContent: 'Clear',
+                style: 'margin-left: 6px; padding: 2px 8px; background: #e0e0e0; border: 1px solid #999; border-radius: 3px; cursor: pointer; font-size: 12px;'
+            });
 
-    function addInventoryFilter() {
-        const racinePopup = document.getElementById('racinePopup');
-        const inventoryPanel = racinePopup?.querySelector('.popupEcranRR_ecranInventaire');
-        if (!inventoryPanel) return;
+            searchContainer.appendChild(searchInput);
+            searchContainer.appendChild(clearButton);
+            header.appendChild(searchContainer);
 
-        const header = inventoryPanel.querySelector('.encart_entete');
-        if (!header || header.querySelector('.rk-inventory-search-container')) return;
+            const debouncedFilter = Utils.debounce(() => this.filterInventory(inventoryPanel, searchInput.value), 150);
 
-        const searchContainer = document.createElement('div');
-        searchContainer.className = 'rk-inventory-search-container';
-        searchContainer.style.cssText = `
-            position: absolute;
-            right: 10px;
-            top: 0px;
-            margin: 0px 0;
-            padding: 5px;
-        `;
+            searchInput.addEventListener('input', debouncedFilter);
+            searchInput.addEventListener('keyup', debouncedFilter);
+            clearButton.addEventListener('click', () => {
+                searchInput.value = '';
+                this.filterInventory(inventoryPanel, '');
+                searchInput.focus();
+            });
+        },
 
-        const searchInput = document.createElement('input');
-        searchInput.type = 'text';
-        searchInput.placeholder = 'Filter...';
-        searchInput.style.cssText = `
-            height: 24px;
-            width: 30%;
-            padding: 4px;
-            font-size: 12px;
-        `;
-
-        const clearButton = document.createElement('button');
-        clearButton.textContent = 'Clear';
-        clearButton.style.cssText = `
-            margin-left: 6px;
-            padding: 2px 8px;
-            background: #e0e0e0;
-            border: 1px solid #999;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-        `;
-
-        searchContainer.appendChild(searchInput);
-        searchContainer.appendChild(clearButton);
-        header.appendChild(searchContainer);
-
-        function filterInventory() {
-            const term = searchInput.value.toLowerCase().trim();
+        filterInventory(inventoryPanel, searchTerm) {
+            const term = searchTerm.toLowerCase().trim();
             const items = inventoryPanel.querySelectorAll('.ConteneurItem');
             items.forEach(item => {
                 const nameDiv = item.querySelector('.inventaire_contenu_01_descriptif');
                 const name = nameDiv?.textContent.toLowerCase().trim() || '';
                 item.style.display = (term === '' || name.includes(term)) ? '' : 'none';
             });
-        }
+        },
 
-        searchInput.addEventListener('input', filterInventory);
-        searchInput.addEventListener('keyup', filterInventory);
-        clearButton.addEventListener('click', () => {
-            searchInput.value = '';
-            filterInventory();
-            searchInput.focus();
-        });
-    }
+        addCurrentItemsSearch() {
+            const legendTable = document.querySelector(CONFIG.SELECTORS.CURRENT_ITEMS_LEGEND);
+            if (!legendTable || legendTable.querySelector('.rk-current-search-container')) return;
 
-    waitForElement('#racinePopup', (racinePopup) => {
-        const inventoryObserver = new MutationObserver(() => {
-            const inventoryPanel = racinePopup.querySelector('.popupEcranRR_ecranInventaire');
-            if (inventoryPanel && !inventoryPanel.querySelector('.rk-inventory-search-container')) {
-                setTimeout(addInventoryFilter, 50);
-            }
-        });
+            const filterRow = document.createElement('tr');
+            const filterCell = document.createElement('td');
+            filterCell.colSpan = 2;
+            filterCell.className = 'td_sans';
 
-        inventoryObserver.observe(racinePopup, { childList: true, subtree: true });
-    });
+            const container = Utils.createElement('div', {
+                className: 'rk-current-search-container',
+                style: 'margin-top: 5px; display: flex; gap: 5px;'
+            });
 
-    // ============ CURRENTLY HELD ITEMS FILTER ============
+            const input = Utils.createElement('input', {
+                attributes: {
+                    type: 'text',
+                    placeholder: 'Search ...'
+                },
+                style: 'flex-grow: 1; width: 50%; padding: 3px; font-size: 12px; border: 1px solid #999; border-radius: 3px;'
+            });
 
-    function addCurrentItemsFilter() {
-        const legendTable = document.querySelector('div.illustrationImage.legendeEvenement:not(.legendeMarche)');
-        if (!legendTable || legendTable.querySelector('.rk-current-search-container')) return;
+            const clear = Utils.createElement('button', {
+                textContent: 'Clear',
+                style: 'padding: 2px 6px; background-color: #e0e0e0; border: 1px solid #999; border-radius: 3px; cursor: pointer; font-size: 12px;'
+            });
 
-        const filterRow = document.createElement('tr');
-        const filterCell = document.createElement('td');
-        filterCell.colSpan = 2;
-        filterCell.className = 'td_sans';
+            container.appendChild(input);
+            container.appendChild(clear);
+            filterCell.appendChild(container);
+            filterRow.appendChild(filterCell);
+            legendTable.querySelector('tbody')?.appendChild(filterRow);
 
-        const container = document.createElement('div');
-        container.className = 'rk-current-search-container';
-        container.style.cssText = `
-            margin-top: 5px;
-            display: flex;
-            gap: 5px;
-        `;
+            const debouncedFilter = Utils.debounce(() => this.filterHeldItems(input.value), 150);
 
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = 'Search ...';
-        input.style.cssText = `
-            flex-grow: 1;
-            width: 50%;
-            padding: 3px;
-            font-size: 12px;
-            border: 1px solid #999;
-            border-radius: 3px;
-        `;
+            input.addEventListener('input', debouncedFilter);
+            input.addEventListener('keyup', debouncedFilter);
+            clear.addEventListener('click', () => {
+                input.value = '';
+                this.filterHeldItems('');
+                input.focus();
+            });
+        },
 
-        const clear = document.createElement('button');
-        clear.textContent = 'Clear';
-        clear.style.cssText = `
-            padding: 2px 6px;
-            background-color: #e0e0e0;
-            border: 1px solid #999;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-        `;
-
-        container.appendChild(input);
-        container.appendChild(clear);
-        filterCell.appendChild(container);
-        filterRow.appendChild(filterCell);
-        legendTable.querySelector('tbody')?.appendChild(filterRow);
-
-        function filterHeldItems() {
-            const searchTerm = input.value.toLowerCase().trim();
+        filterHeldItems(searchTerm) {
+            const term = searchTerm.toLowerCase().trim();
             const items = document.querySelectorAll('.ConteneurItem');
 
             items.forEach(item => {
@@ -349,384 +354,447 @@
                 }
 
                 const itemName = nameDiv?.textContent.toLowerCase().trim() || '';
-                item.style.display = (searchTerm === '' || itemName.includes(searchTerm)) ? '' : 'none';
+                item.style.display = (term === '' || itemName.includes(term)) ? '' : 'none';
             });
+        },
+
+        initIframeSupport() {
+            const checkIframes = () => {
+                const iframes = document.querySelectorAll('iframe');
+                iframes.forEach(iframe => {
+                    try {
+                        iframe.addEventListener('load', () => {
+                            try {
+                                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                                if (iframeDoc.querySelector(CONFIG.SELECTORS.MARKET_LEGEND)) {
+                                    this.addMarketSearch(iframeDoc);
+                                }
+                            } catch (e) {
+                                console.log('Cannot access iframe content (cross-origin)');
+                            }
+                        });
+
+                        if (iframe.contentDocument) {
+                            const iframeDoc = iframe.contentDocument;
+                            if (iframeDoc.querySelector(CONFIG.SELECTORS.MARKET_LEGEND)) {
+                                this.addMarketSearch(iframeDoc);
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Cannot access iframe content (cross-origin)');
+                    }
+                });
+            };
+
+            setTimeout(checkIframes, CONFIG.DELAYS.INIT_DELAY);
+
+            const iframeObserver = new MutationObserver(mutations => {
+                mutations.forEach(mutation => {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === 1 && node.tagName === 'IFRAME') {
+                            setTimeout(() => {
+                                try {
+                                    const iframeDoc = node.contentDocument || node.contentWindow.document;
+                                    if (iframeDoc.querySelector(CONFIG.SELECTORS.MARKET_LEGEND)) {
+                                        this.addMarketSearch(iframeDoc);
+                                    }
+                                } catch (e) {
+                                    console.log('Cannot access iframe content (cross-origin)');
+                                }
+                            }, CONFIG.DELAYS.IFRAME_CHECK);
+                        }
+                    });
+                });
+            });
+
+            iframeObserver.observe(document.body, { childList: true, subtree: true });
         }
+    };
 
-        input.addEventListener('input', filterHeldItems);
-        input.addEventListener('keyup', filterHeldItems);
-        clear.addEventListener('click', () => {
-            input.value = '';
-            filterHeldItems();
-            input.focus();
-        });
-    }
+    // ============ BULK TRANSFER FUNCTIONALITY ============
+    const BulkTransfer = {
+        selectedItems: new Set(),
 
-    waitForElement('table.table_legende', () => {
-        addCurrentItemsFilter();
-    });
+        addCheckboxes() {
+            const targetDiv = document.querySelector('div.texte.texteInventaire');
+            if (!targetDiv) return;
 
-    // ============ BULK INVENTORY TRANSFER ============
+            const items = targetDiv.querySelectorAll(CONFIG.SELECTORS.INVENTORY_ITEMS);
 
-    // Function to add checkboxes to items
-    function addCheckboxes() {
-        const targetDiv = document.querySelector('div.texte.texteInventaire');
-        if (!targetDiv) return;
+            items.forEach(item => {
+                if (item.querySelector('.bulk-transfer-checkbox')) return;
 
-        const items = targetDiv.querySelectorAll('.ConteneurItem.bas');
+                const throwLink = item.querySelector('a[id^="jeter"]');
+                if (!throwLink) return;
 
-        items.forEach(item => {
-            if (item.querySelector('.bulk-transfer-checkbox')) return;
+                const checkbox = Utils.createElement('input', {
+                    className: 'bulk-transfer-checkbox',
+                    attributes: {
+                        type: 'checkbox'
+                    }
+                });
 
-            const throwLink = item.querySelector('a[id^="jeter"]');
-            if (!throwLink) return;
+                checkbox.dataset.itemId = item.id.replace('Item', '');
 
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.className = 'bulk-transfer-checkbox';
-            checkbox.dataset.itemId = item.id.replace('Item', '');
+                const itemNameEl = item.querySelector('.inventaire_contenu_01_descriptif');
+                if (itemNameEl) {
+                    checkbox.dataset.itemName = itemNameEl.textContent.trim();
+                }
 
-            const itemNameEl = item.querySelector('.inventaire_contenu_01_descriptif');
-            if (itemNameEl) {
-                checkbox.dataset.itemName = itemNameEl.textContent.trim();
+                throwLink.parentNode.insertBefore(checkbox, throwLink.nextSibling);
+            });
+        },
+
+        createTransferUI() {
+            const legendTable = document.querySelector(CONFIG.SELECTORS.LEGEND_TABLE);
+
+            if (!legendTable || document.getElementById('bulk-transfer-row')) return;
+
+            const parentDiv = legendTable.closest('div.illustrationImage');
+
+            if (!parentDiv || !parentDiv.classList.contains('legendeEvenement') || 
+                parentDiv.classList.contains('legendeMarche')) {
+                return;
             }
 
-            throwLink.parentNode.insertBefore(checkbox, throwLink.nextSibling);
-        });
-    }
+            const row = document.createElement('tr');
+            row.id = 'bulk-transfer-row';
 
-    // Function to create the transfer button in legend table
-    function createTransferUI() {
-        const legendTable = document.querySelector('table.table_legende');
-    
-        if (!legendTable || document.getElementById('bulk-transfer-row')) return;
-    
-        const parentDiv = legendTable.closest('div.illustrationImage');
-    
-        if (!parentDiv) return; // no matching parent div found
-    
-        // Ensure it has 'legendeEvenement' and does NOT have 'legendeMarche'
-        if (!parentDiv.classList.contains('legendeEvenement') || parentDiv.classList.contains('legendeMarche')) {
-            return;
-        }
+            const td1 = Utils.createElement('td', { className: 'td_sans' });
+            const btn = Utils.createElement('button', {
+                className: 'bulk-transfer-btn',
+                textContent: 'Bulk Transfer'
+            });
+            btn.addEventListener('click', () => this.transferSelectedItems());
+            td1.appendChild(btn);
 
-        // Create new row for bulk transfer
-        const row = document.createElement('tr');
-        row.id = 'bulk-transfer-row';
+            const td2 = Utils.createElement('td', { className: 'td_sans' });
+            const progress = Utils.createElement('div', {
+                className: 'bulk-transfer-progress',
+                textContent: '0 selected'
+            });
+            td2.appendChild(progress);
 
-        const td1 = document.createElement('td');
-        td1.className = 'td_sans';
+            row.appendChild(td1);
+            row.appendChild(td2);
 
-        const btn = document.createElement('button');
-        btn.className = 'bulk-transfer-btn';
-        btn.textContent = 'Bulk Transfer';
-        btn.addEventListener('click', transferSelectedItems);
-        td1.appendChild(btn);
-
-        const td2 = document.createElement('td');
-        td2.className = 'td_sans';
-
-        const progress = document.createElement('div');
-        progress.className = 'bulk-transfer-progress';
-        progress.textContent = '0 selected';
-        td2.appendChild(progress);
-
-        row.appendChild(td1);
-        row.appendChild(td2);
-
-        // Insert after the last transfert row
-        const lastTransferRow = legendTable.querySelector('tr[id^="transfert"]:last-of-type');
-        if (lastTransferRow) {
-            lastTransferRow.parentNode.insertBefore(row, lastTransferRow.nextSibling);
-        } else {
-            legendTable.querySelector('tbody').appendChild(row);
-        }
-
-        // Update selection count when checkboxes change
-        document.addEventListener('change', function(e) {
-            if (e.target.classList.contains('bulk-transfer-checkbox')) {
-                updateSelectionCount();
+            const lastTransferRow = legendTable.querySelector('tr[id^="transfert"]:last-of-type');
+            if (lastTransferRow) {
+                lastTransferRow.parentNode.insertBefore(row, lastTransferRow.nextSibling);
+            } else {
+                legendTable.querySelector('tbody').appendChild(row);
             }
-        });
-    }
 
-    function updateSelectionCount() {
-        const checkboxes = document.querySelectorAll('.bulk-transfer-checkbox:checked');
-        const progress = document.querySelector('.bulk-transfer-progress');
-        if (progress) {
-            progress.textContent = `${checkboxes.length} selected`;
-        }
-    }
+            document.addEventListener('change', (e) => {
+                if (e.target.classList.contains('bulk-transfer-checkbox')) {
+                    this.updateSelectionCount();
+                }
+            });
+        },
 
-    async function transferSelectedItems() {
-        const checkboxes = document.querySelectorAll('.bulk-transfer-checkbox:checked');
-        const btn = document.querySelector('.bulk-transfer-btn');
-        const progress = document.querySelector('.bulk-transfer-progress');
+        updateSelectionCount() {
+            const checkboxes = document.querySelectorAll('.bulk-transfer-checkbox:checked');
+            const progress = document.querySelector('.bulk-transfer-progress');
+            if (progress) {
+                progress.textContent = `${checkboxes.length} selected`;
+            }
+        },
 
-        if (checkboxes.length === 0) return;
+        async transferSelectedItems() {
+            const checkboxes = document.querySelectorAll('.bulk-transfer-checkbox:checked');
+            const btn = document.querySelector('.bulk-transfer-btn');
+            const progress = document.querySelector('.bulk-transfer-progress');
 
-        btn.disabled = true;
-        btn.textContent = 'Transferring...';
+            if (checkboxes.length === 0) return;
 
-        let successCount = 0;
-        let failCount = 0;
+            btn.disabled = true;
+            btn.textContent = 'Transferring...';
 
-        for (let i = 0; i < checkboxes.length; i++) {
-            const checkbox = checkboxes[i];
-            const itemId = checkbox.dataset.itemId;
-            const itemName = checkbox.dataset.itemName || `Item ${itemId}`;
+            let successCount = 0;
+            let failCount = 0;
+
+            for (let i = 0; i < checkboxes.length; i++) {
+                const checkbox = checkboxes[i];
+                const itemId = checkbox.dataset.itemId;
+                const itemName = checkbox.dataset.itemName || `Item ${itemId}`;
+
+                if (progress) {
+                    progress.textContent = `Transferring ${i + 1}/${checkboxes.length}`;
+                }
+
+                try {
+                    await this.transferItem(itemId);
+                    successCount++;
+                    checkbox.checked = false;
+                } catch (error) {
+                    console.error(`Failed to transfer ${itemName}:`, error);
+                    failCount++;
+                }
+
+                await new Promise(resolve => setTimeout(resolve, CONFIG.DELAYS.TRANSFER_DELAY));
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Bulk Transfer';
 
             if (progress) {
-                progress.textContent = `Transferring ${i+1}/${checkboxes.length}`;
+                progress.textContent = `${successCount} transferred`;
             }
 
-            try {
-                await transferItem(itemId);
-                successCount++;
-                checkbox.checked = false;
-            } catch (error) {
-                console.error(`Failed to transfer ${itemName}:`, error);
-                failCount++;
-            }
+            setTimeout(() => {
+                window.location.reload();
+            }, CONFIG.DELAYS.INIT_DELAY);
+        },
 
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        btn.disabled = false;
-        btn.textContent = 'Bulk Transfer';
-
-        if (progress) {
-            progress.textContent = `${successCount} transferred`;
-        }
-
-        setTimeout(() => {
-            window.location.reload();
-        }, 1000);
-    }
-
-    function transferItem(itemId) {
-        return new Promise((resolve, reject) => {
+        async transferItem(itemId) {
             const transferBtn = document.getElementById(`transferer${itemId}`);
             if (!transferBtn) {
-                reject(new Error(`Transfer button not found for item ${itemId}`));
-                return;
+                throw new Error(`Transfer button not found for item ${itemId}`);
             }
 
             const onclick = transferBtn.getAttribute('onclick');
             const paramsMatch = onclick.match(/ouvreOptionsItem\(([^)]+)\)/);
             if (!paramsMatch) {
-                reject(new Error(`Could not extract parameters for item ${itemId}`));
-                return;
+                throw new Error(`Could not extract parameters for item ${itemId}`);
             }
 
             const params = paramsMatch[1].split(',').map(p => p.trim().replace(/'/g, ''));
             const url = `https://www.renaissancekingdoms.com/Action.php?action=69&type=${params[2]}&IDParametre=${params[3]}`;
             const body = `quantite=${params[4] || '1'}&destination=transfererPropriete&submit=OK`;
 
-            GM_xmlhttpRequest({
+            const response = await Utils.makeHttpRequest({
                 method: 'POST',
                 url: url,
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
                 },
-                data: body,
-                onload: function(response) {
-                    if (response.status >= 200 && response.status < 300) {
-                        resolve(response);
-                    } else {
-                        reject(new Error(`HTTP ${response.status}`));
+                data: body
+            });
+
+            if (response.status < 200 || response.status >= 300) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            return response;
+        },
+
+        init() {
+            const targetDiv = document.querySelector('div.texte.texteInventaire');
+            if (!targetDiv) return;
+
+            this.addCheckboxes();
+            this.createTransferUI();
+
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.addedNodes.length) {
+                        this.addCheckboxes();
+                        this.createTransferUI();
                     }
-                },
-                onerror: function(error) {
-                    reject(error);
-                }
+                });
             });
-        });
-    }
 
-    // Initialize bulk transfer functionality
-    function initBulkTransfer() {
-        const targetDiv = document.querySelector('div.texte.texteInventaire');
-        if (!targetDiv) return;
-
-        addCheckboxes();
-        createTransferUI();
-
-        const observer = new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                if (mutation.addedNodes.length) {
-                    addCheckboxes();
-                    createTransferUI();
-                }
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
             });
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-    }
-
-    // Start all functionality
-    setTimeout(initBulkTransfer, 1000);
-
- 
-// add header sorting functionality in inventory, property and market
-let sortDirection = {
-    qty: 1,
-    name: 1,
-    weight: 1,
-    marketName: 1,
-    marketPrice: 1,
-    marketQty: 1
-};
-
-function sortItems(key, selector, isNumeric, containerSelector) {
-    let container = document.querySelector(containerSelector);
-    if (!container) return;
-
-    let allRows = Array.from(container.querySelectorAll(selector));
-    if (!allRows.length) return;
-
-    let parent = allRows[0].parentNode;
-
-    allRows.sort((a, b) => {
-        let aVal = a.textContent.trim();
-        let bVal = b.textContent.trim();
-
-        if (isNumeric) {
-            aVal = parseFloat(aVal.replace(",", ".")) || 0;
-            bVal = parseFloat(bVal.replace(",", ".")) || 0;
-        } else {
-            aVal = aVal.toLowerCase();
-            bVal = bVal.toLowerCase();
         }
+    };
 
-        if (aVal < bVal) return -1 * sortDirection[key];
-        if (aVal > bVal) return 1 * sortDirection[key];
-        return 0;
-    });
+    // ============ SORTING FUNCTIONALITY ============
+    const SortManager = {
+        sortDirection: {
+            qty: 1,
+            name: 1,
+            weight: 1,
+            marketName: 1,
+            marketPrice: 1,
+            marketQty: 1
+        },
 
-    sortDirection[key] *= -1;
+        makeHeaderSortable(element, key, sortFunction) {
+            if (!element || element.dataset.sortBound) return;
 
-    allRows.forEach(row => parent.appendChild(row));
-}
+            element.classList.add('sortable-header');
+            element.title = "Click to sort";
+            element.dataset.sortBound = "1";
+            element.addEventListener("click", () => sortFunction(key));
+        },
 
-// === INVENTORY ===
-function makeInventoryHeaderClickable(text, key, selector, isNumeric) {
-    let header = Array.from(document.querySelectorAll(".inventaire_contenu_01 b"))
-        .find(el => el.textContent.trim() === text);
-    if (header && !header.dataset.sortBound) {
-        header.style.cursor = "pointer";
-        header.title = "Click to sort";
-        header.dataset.sortBound = "1";
-        header.addEventListener("click", () => sortInventory(key, selector, isNumeric));
-    }
-}
+        sortInventory(key) {
+            let allItems = Array.from(document.querySelectorAll(".ConteneurItem"));
+            if (!allItems.length) return;
 
-function sortInventory(key, selector, isNumeric) {
-    let allItems = Array.from(document.querySelectorAll(".ConteneurItem"));
-    if (!allItems.length) return;
+            let items = allItems.filter(el => {
+                let nbreText = el.querySelector(".inventaire_contenu_01_nbre")?.textContent.trim() || "";
+                let isHeader = nbreText === "#" || nbreText === "";
+                let isMoney = el.classList.contains("item_inventaire_ecu");
+                return !isHeader && !isMoney;
+            });
 
-    let items = allItems.filter(el => {
-        let nbreText = el.querySelector(".inventaire_contenu_01_nbre")?.textContent.trim() || "";
-        let isHeader = nbreText === "#" || nbreText === "";
-        let isMoney = el.classList.contains("item_inventaire_ecu");
-        return !isHeader && !isMoney;
-    });
+            let parent = allItems[0].parentNode;
 
-    let parent = allItems[0].parentNode;
+            const sortConfig = {
+                qty: { selector: ".inventaire_contenu_01_nbre", numeric: true },
+                name: { selector: ".inventaire_contenu_01_descriptif", numeric: false },
+                weight: { selector: ".inventaire_contenu_01_poids", numeric: true }
+            };
 
-    items.sort((a, b) => {
-        let aVal = a.querySelector(selector)?.textContent.trim() || "";
-        let bVal = b.querySelector(selector)?.textContent.trim() || "";
+            const config = sortConfig[key];
+            if (!config) return;
 
-        if (isNumeric) {
-            aVal = parseFloat(aVal.replace(",", ".")) || 0;
-            bVal = parseFloat(bVal.replace(",", ".")) || 0;
-        } else {
-            aVal = aVal.toLowerCase();
-            bVal = bVal.toLowerCase();
+            items.sort((a, b) => {
+                let aVal = a.querySelector(config.selector)?.textContent.trim() || "";
+                let bVal = b.querySelector(config.selector)?.textContent.trim() || "";
+
+                if (config.numeric) {
+                    aVal = parseFloat(aVal.replace(",", ".")) || 0;
+                    bVal = parseFloat(bVal.replace(",", ".")) || 0;
+                } else {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+
+                if (aVal < bVal) return -1 * this.sortDirection[key];
+                if (aVal > bVal) return 1 * this.sortDirection[key];
+                return 0;
+            });
+
+            this.sortDirection[key] *= -1;
+
+            allItems.forEach(el => {
+                if (!items.includes(el)) parent.appendChild(el);
+            });
+            items.forEach(item => parent.appendChild(item));
+        },
+
+        sortMarket(key, colIndex, isNumeric) {
+            let table = document.querySelector(CONFIG.SELECTORS.MARKET_TABLE);
+            if (!table) return;
+
+            let rows = Array.from(table.querySelectorAll("tr")).slice(1);
+            let parent = rows[0]?.parentNode;
+            if (!rows.length) return;
+
+            rows.sort((a, b) => {
+                let aVal = a.querySelector(`td:nth-child(${colIndex})`)?.textContent.trim() || "";
+                let bVal = b.querySelector(`td:nth-child(${colIndex})`)?.textContent.trim() || "";
+
+                if (isNumeric) {
+                    aVal = parseFloat(aVal.replace(",", ".")) || 0;
+                    bVal = parseFloat(bVal.replace(",", ".")) || 0;
+                } else {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+
+                if (aVal < bVal) return -1 * this.sortDirection[key];
+                if (aVal > bVal) return 1 * this.sortDirection[key];
+                return 0;
+            });
+
+            this.sortDirection[key] *= -1;
+            rows.forEach(r => parent.appendChild(r));
+        },
+
+        applySortingHeaders() {
+            // Inventory headers
+            const qtyHeader = Array.from(document.querySelectorAll(".inventaire_contenu_01 b"))
+                .find(el => el.textContent.trim() === "#");
+            this.makeHeaderSortable(qtyHeader, "qty", () => this.sortInventory("qty"));
+
+            const nameHeader = Array.from(document.querySelectorAll(".inventaire_contenu_01 b"))
+                .find(el => el.textContent.trim() === "Nazwa");
+            this.makeHeaderSortable(nameHeader, "name", () => this.sortInventory("name"));
+
+            const weightHeader = Array.from(document.querySelectorAll(".inventaire_contenu_01 b"))
+                .find(el => el.textContent.trim() === "Masa");
+            this.makeHeaderSortable(weightHeader, "weight", () => this.sortInventory("weight"));
+
+            // Market headers
+            const marketNameHeader = document.querySelector(`${CONFIG.SELECTORS.MARKET_TABLE} tr:first-child td:nth-child(2) strong`);
+            if (marketNameHeader?.textContent.trim() === "Nazwa") {
+                this.makeHeaderSortable(marketNameHeader, "marketName", () => this.sortMarket("marketName", 2, false));
+            }
+
+            const marketPriceHeader = document.querySelector(`${CONFIG.SELECTORS.MARKET_TABLE} tr:first-child td:nth-child(3) strong`);
+            if (marketPriceHeader?.textContent.trim() === "Cena") {
+                this.makeHeaderSortable(marketPriceHeader, "marketPrice", () => this.sortMarket("marketPrice", 3, true));
+            }
+
+            const marketQtyHeader = document.querySelector(`${CONFIG.SELECTORS.MARKET_TABLE} tr:first-child td:nth-child(4) strong`);
+            if (marketQtyHeader?.textContent.trim() === "Ilość") {
+                this.makeHeaderSortable(marketQtyHeader, "marketQty", () => this.sortMarket("marketQty", 4, true));
+            }
+        },
+
+        init() {
+            this.applySortingHeaders();
+
+            const observer = new MutationObserver(() => {
+                this.applySortingHeaders();
+            });
+
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
         }
+    };
 
-        if (aVal < bVal) return -1 * sortDirection[key];
-        if (aVal > bVal) return 1 * sortDirection[key];
-        return 0;
-    });
+    // ============ MAIN INITIALIZATION ============
+    const App = {
+        init() {
+            // Add styles
+            Utils.addStyles(STYLES);
 
-    sortDirection[key] *= -1;
+            // Initialize components
+            this.initSearchFunctionality();
+            this.initBulkTransfer();
+            this.initSorting();
+        },
 
-    allItems.forEach(el => {
-        if (!items.includes(el)) parent.appendChild(el);
-    });
-    items.forEach(item => parent.appendChild(item));
-}
+        initSearchFunctionality() {
+            // Market search
+            Utils.waitForElement(CONFIG.SELECTORS.MARKET_LEGEND, () => {
+                SearchManager.addMarketSearch();
+            });
 
-// === MARKET ===
-function makeMarketHeaderClickable(text, key, colIndex, isNumeric) {
-    let header = document.querySelector(`#zoneTexte0 table tr:first-child td:nth-child(${colIndex}) strong`);
-    if (header && header.textContent.trim() === text && !header.dataset.sortBound) {
-        header.style.cursor = "pointer";
-        header.title = "Click to sort";
-        header.dataset.sortBound = "1";
-        header.addEventListener("click", () => sortMarket(key, colIndex, isNumeric));
-    }
-}
+            // Inventory search
+            Utils.waitForElement(CONFIG.SELECTORS.RACINE_POPUP, (racinePopup) => {
+                const inventoryObserver = new MutationObserver(() => {
+                    const inventoryPanel = racinePopup.querySelector(CONFIG.SELECTORS.INVENTORY_PANEL);
+                    if (inventoryPanel && !inventoryPanel.querySelector('.rk-inventory-search-container')) {
+                        setTimeout(() => SearchManager.addInventorySearch(), 50);
+                    }
+                });
+                inventoryObserver.observe(racinePopup, { childList: true, subtree: true });
+            });
 
-function sortMarket(key, colIndex, isNumeric) {
-    let table = document.querySelector("#zoneTexte0 table");
-    if (!table) return;
+            // Current items search
+            Utils.waitForElement(CONFIG.SELECTORS.LEGEND_TABLE, () => {
+                SearchManager.addCurrentItemsSearch();
+            });
 
-    let rows = Array.from(table.querySelectorAll("tr")).slice(1); // skip header
-    let parent = rows[0]?.parentNode;
-    if (!rows.length) return;
+            // Initialize iframe support
+            SearchManager.initIframeSupport();
+        },
 
-    rows.sort((a, b) => {
-        let aVal = a.querySelector(`td:nth-child(${colIndex})`)?.textContent.trim() || "";
-        let bVal = b.querySelector(`td:nth-child(${colIndex})`)?.textContent.trim() || "";
+        initBulkTransfer() {
+            setTimeout(() => BulkTransfer.init(), CONFIG.DELAYS.INIT_DELAY);
+        },
 
-        if (isNumeric) {
-            aVal = parseFloat(aVal.replace(",", ".")) || 0;
-            bVal = parseFloat(bVal.replace(",", ".")) || 0;
-        } else {
-            aVal = aVal.toLowerCase();
-            bVal = bVal.toLowerCase();
+        initSorting() {
+            SortManager.init();
         }
+    };
 
-        if (aVal < bVal) return -1 * sortDirection[key];
-        if (aVal > bVal) return 1 * sortDirection[key];
-        return 0;
-    });
-
-    sortDirection[key] *= -1;
-    rows.forEach(r => parent.appendChild(r));
-}
-
-function applySortingHeaders() {
-    // Inventory
-    makeInventoryHeaderClickable("#", "qty", ".inventaire_contenu_01_nbre", true);
-    makeInventoryHeaderClickable("Nazwa", "name", ".inventaire_contenu_01_descriptif", false);
-    makeInventoryHeaderClickable("Masa", "weight", ".inventaire_contenu_01_poids", true);
-
-    // Market
-    makeMarketHeaderClickable("Nazwa", "marketName", 2, false);
-    makeMarketHeaderClickable("Cena", "marketPrice", 3, true);
-    makeMarketHeaderClickable("Ilość", "marketQty", 4, true);
-}
-
-// Initial bind
-applySortingHeaders();
-
-// Watch for changes
-const observer = new MutationObserver(() => {
-    applySortingHeaders();
-});
-
-observer.observe(document.body, {
-    childList: true,
-    subtree: true
-});
-
+    // Start the application
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => App.init());
+    } else {
+        App.init();
+    }
 
 })();
