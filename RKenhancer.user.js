@@ -797,7 +797,7 @@
         App.init();
     }
 
-// ============ ADD MAX AP OPTION TO DURATION SELECT (dynamic, 5AP or 10AP base) ============
+// ============ ADD MAX AP OPTION TO DURATION SELECT (dynamic, base 5AP or 10AP) ============
 
 (function maxApOptionEnhancer() {
     const MAX_AP = 115;
@@ -810,10 +810,10 @@
         return `${m}min`;
     }
 
-    function detectBaseAP(select) {
-        // look for the special item353 image in a .details_gains
-        const popup = select.closest('.details_gains') || document.querySelector('.details_gains');
-        if (popup && popup.querySelector('.bloc_gain_lot img[src*="item353.webp"]')) {
+    function detectBaseAP() {
+        // if details_gains contains item353.webp => herb gathering = 10AP
+        const dg = document.querySelector('.details_gains');
+        if (dg && dg.querySelector('.bloc_gain_lot img[src*="item353.webp"]')) {
             return 10;
         }
         return 5;
@@ -827,7 +827,7 @@
         const baseMinutes = parseInt(firstOption.value, 10);
         if (!Number.isFinite(baseMinutes) || baseMinutes <= 0) return;
 
-        const baseAP = detectBaseAP(select);
+        const baseAP = detectBaseAP();
         const minutesPerAP = baseMinutes / baseAP;
         const totalMinutes = Math.round(minutesPerAP * MAX_AP);
         const label = `${formatMinutes(totalMinutes)} (${MAX_AP} AP)`;
