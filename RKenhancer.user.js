@@ -797,22 +797,11 @@
         App.init();
     }
 
-// ============ ADD MAX AP OPTION TO DURATION SELECT ============
+// ============ ADD MAX AP OPTION TO DURATION SELECT (dynamic) ============
 
-function addMaxAPOption(select) {
-    if (!select || select.dataset.maxApAdded) return;
-
-    const firstOption = select.options[0];
-    if (!firstOption) return;
-
-    const baseMinutes = parseInt(firstOption.value, 10);
-    const baseAP = 5;
-    const maxAP = 115;
-
-    if (!baseMinutes || baseMinutes <= 0) return;
-
-    const minutesPerAP = baseMinutes / baseAP;
-    const totalMinutes = Math.round(minutesPerAP * maxAP);
+(function maxApOptionEnhancer() {
+    const MAX_AP = 115;
+    const BASE_AP = 5;
 
     function formatMinutes(mins) {
         const h = Math.floor(mins / 60);
@@ -822,38 +811,91 @@ function addMaxAPOption(select) {
         return `${m}min`;
     }
 
-    const newOption = document.createElement("option");
-    newOption.value = totalMinutes;
-    newOption.textContent = formatMinutes(totalMinutes) + " (115 AP)";
-    select.appendChild(newOption);
+    function ensureMaxAP(select) {
+        if (!select) return;
 
-    // Mark so we don’t add again
-    select.dataset.maxApAdded = "1";
-}
+        const firstOption = select.options[0];
+        if (!firstOption) return;
 
-// Observe DOM for select_duree
-const dureeObserver = new MutationObserver(mutations => {
-    mutations.forEach(m => {
-        m.addedNodes.forEach(node => {
-            if (node.nodeType === 1) {
-                if (node.id === "select_duree") {
-                    addMaxAPOption(node);
-                } else {
-                    const found = node.querySelector?.("#select_duree");
-                    if (found) addMaxAPOption(found);
+        const baseMinutes = parseInt(firstOption.value, 10);
+        if (!Number.isFinite(baseMinutes) || baseMinutes <= 0) return;
+
+        const minutesPerAP = baseMinutes / BASE_AP;
+        const totalMinutes = Math.round(minutesPerAP * MAX_AP);
+        const label = `${formatMinutes(totalMinutes)} (115 AP)`;
+
+        // Add or update the 115 AP option
+        let opt = select.querySelector('option[data-ap115="1"]');
+        if (!opt) {
+            opt = document.createElement('option');
+            opt.setAttribute('data-ap115', '1');
+            select.appendChild(opt);
+        }
+        opt.value = String(totalMinutes);
+        opt.textContent = label;
+
+        // If the site rebuilds this select, re-ensure our option
+        if (!select._ap115Observed) {
+            const selObs = new MutationObserver(() => ensureMaxAP(select));
+            selObs.observe(select, { childList: true });
+            select._ap115Observed = true;
+        }
+    }
+
+    function scan(doc) {
+        doc.querySelectorAll('#select_duree').forEach(ensureMaxAP);
+    }
+
+    function bindDoc(doc) {
+        if (!doc || doc._ap115Bound) return;
+        doc._ap115Bound = true;
+
+        // Initial scan
+        scan(doc);
+
+        // Watch for new nodes (popups built after clicks, etc.)
+        const mo = new MutationObserver(muts => {
+            muts.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType !== 1) return;
+                    if (node.id === 'select_duree') {
+                        ensureMaxAP(node);
+                    } else {
+                        node.querySelectorAll?.('#select_duree')?.forEach(ensureMaxAP);
+                    }
+                });
+            });
+        });
+        mo.observe(doc.body || doc, { childList: true, subtree: true });
+
+        // After any click, re-scan (helps when HTML is injected right after the click)
+        doc.addEventListener('click', () => setTimeout(() => scan(doc), 120), true);
+    }
+
+    // Main document
+    bindDoc(document);
+
+    // Iframes (existing & future)
+    function bindIframe(iframe) {
+        try {
+            const idoc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (idoc) bindDoc(idoc);
+        } catch (e) {
+            // cross-origin iframe; cannot access
+        }
+    }
+
+    document.querySelectorAll('iframe').forEach(bindIframe);
+
+    const ifObs = new MutationObserver(muts => {
+        muts.forEach(m => {
+            m.addedNodes.forEach(n => {
+                if (n.nodeType === 1 && n.tagName === 'IFRAME') {
+                    n.addEventListener('load', () => bindIframe(n));
+                    bindIframe(n);
                 }
-            }
+            });
         });
     });
-});
-
-dureeObserver.observe(document.body, { childList: true, subtree: true });
-
-// If already present on page load
-const existingSelect = document.querySelector("#select_duree");
-if (existingSelect) addMaxAPOption(existingSelect);
-
-})();
-
-
+    ifObs.observe(document.body, { childList: true, subtree: true });
 })();
