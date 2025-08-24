@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      2.2
+// @version      2.3
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
