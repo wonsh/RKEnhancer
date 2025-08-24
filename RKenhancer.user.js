@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.4
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
@@ -810,45 +810,58 @@
         return `${m}min`;
     }
 
-    function detectBaseAP() {
-        // if details_gains contains item353.webp => herb gathering = 10AP
-        const dg = document.querySelector('.details_gains');
-        if (dg && dg.querySelector('.bloc_gain_lot img[src*="item353.webp"]')) {
-            return 10;
+    function detectActivityAP() {
+        // Get AP cost directly from the valeur_PA element
+        const valeurPA = document.querySelector('.valeur_PA');
+        if (valeurPA) {
+            const apCost = parseInt(valeurPA.textContent.trim(), 10);
+            if (apCost > 0) {
+                return apCost;
+            }
         }
+        
+        // Fallback to 5 AP if not found
         return 5;
     }
 
-function ensureMaxAP(select) {
-    if (!select) return;
-    const firstOption = select.options[0];
-    if (!firstOption) return;
+    function ensureMaxAP(select) {
+        if (!select) return;
+        const firstOption = select.options[0];
+        if (!firstOption) return;
 
-    // Detect base AP from DOM
+        // Get base duration from first option
+        const baseMinutes = parseInt(firstOption.value, 10);
+        
+        // Detect activity AP cost from context
+        const activityAP = detectActivityAP();
+        
+        // Calculate minutes per AP based on base duration and activity AP cost
+        const minutesPerAP = baseMinutes / activityAP;
+        
+        // Calculate total duration for 115 AP
+        const totalMinutes = Math.round(minutesPerAP * MAX_AP);
+        const label = `${formatMinutes(totalMinutes)} (115 AP)`;
 
-    const baseMinutes = parseInt(firstOption.value, 10);
-    const baseAP = detectBaseAP(select); // 5 or 10 depending on .details_gains
-    const minutesPerAP = baseMinutes / baseAP;
-    const totalMinutes = Math.round(minutesPerAP * MAX_AP);
-    const label = `${formatMinutes(totalMinutes)} (115 AP)`;
+        // Add or update our 115 AP option
+        let opt = select.querySelector('option[data-ap115="1"]');
+        if (!opt) {
+            opt = document.createElement('option');
+            opt.setAttribute('data-ap115', '1');
+            select.appendChild(opt);
+        }
+        opt.value = String(totalMinutes);
+        opt.textContent = label;
 
-    // Add or update our 115 AP option
-    let opt = select.querySelector('option[data-ap115="1"]');
-    if (!opt) {
-        opt = document.createElement('option');
-        opt.setAttribute('data-ap115', '1');
-        select.appendChild(opt);
+        // Debug logging
+        console.log(`Activity AP: ${activityAP}, Base minutes: ${baseMinutes}, Minutes per AP: ${minutesPerAP.toFixed(2)}, Total for 115 AP: ${totalMinutes}`);
+
+        // Observe future changes in this select
+        if (!select._ap115Observed) {
+            const selObs = new MutationObserver(() => ensureMaxAP(select));
+            selObs.observe(select, { childList: true });
+            select._ap115Observed = true;
+        }
     }
-    opt.value = String(totalMinutes);
-    opt.textContent = label;
-
-    // Observe future changes in this select
-    if (!select._ap115Observed) {
-        const selObs = new MutationObserver(() => ensureMaxAP(select));
-        selObs.observe(select, { childList: true });
-        select._ap115Observed = true;
-    }
-}
 
     // Watch for new #select_duree
     const mo = new MutationObserver(muts => {
@@ -870,6 +883,5 @@ function ensureMaxAP(select) {
     const existing = document.querySelector('#select_duree');
     if (existing) ensureMaxAP(existing);
 })();
-
 
 })();
