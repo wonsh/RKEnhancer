@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.0
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
@@ -813,7 +813,6 @@
 
     function ensureMaxAP(select) {
         if (!select) return;
-
         const firstOption = select.options[0];
         if (!firstOption) return;
 
@@ -824,7 +823,6 @@
         const totalMinutes = Math.round(minutesPerAP * MAX_AP);
         const label = `${formatMinutes(totalMinutes)} (115 AP)`;
 
-        // Add or update the 115 AP option
         let opt = select.querySelector('option[data-ap115="1"]');
         if (!opt) {
             opt = document.createElement('option');
@@ -833,69 +831,28 @@
         }
         opt.value = String(totalMinutes);
         opt.textContent = label;
-
-        // If the site rebuilds this select, re-ensure our option
-        if (!select._ap115Observed) {
-            const selObs = new MutationObserver(() => ensureMaxAP(select));
-            selObs.observe(select, { childList: true });
-            select._ap115Observed = true;
-        }
     }
 
-    function scan(doc) {
-        doc.querySelectorAll('#select_duree').forEach(ensureMaxAP);
-    }
-
-    function bindDoc(doc) {
-        if (!doc || doc._ap115Bound) return;
-        doc._ap115Bound = true;
-
-        // Initial scan
-        scan(doc);
-
-        // Watch for new nodes (popups built after clicks, etc.)
-        const mo = new MutationObserver(muts => {
-            muts.forEach(m => {
-                m.addedNodes.forEach(node => {
-                    if (node.nodeType !== 1) return;
-                    if (node.id === 'select_duree') {
-                        ensureMaxAP(node);
-                    } else {
-                        node.querySelectorAll?.('#select_duree')?.forEach(ensureMaxAP);
-                    }
-                });
-            });
-        });
-        mo.observe(doc.body || doc, { childList: true, subtree: true });
-
-        // After any click, re-scan (helps when HTML is injected right after the click)
-        doc.addEventListener('click', () => setTimeout(() => scan(doc), 120), true);
-    }
-
-    // Main document
-    bindDoc(document);
-
-    // Iframes (existing & future)
-    function bindIframe(iframe) {
-        try {
-            const idoc = iframe.contentDocument || iframe.contentWindow?.document;
-            if (idoc) bindDoc(idoc);
-        } catch (e) {
-            // cross-origin iframe; cannot access
-        }
-    }
-
-    document.querySelectorAll('iframe').forEach(bindIframe);
-
-    const ifObs = new MutationObserver(muts => {
+    // Watch for new #select_duree
+    const mo = new MutationObserver(muts => {
         muts.forEach(m => {
-            m.addedNodes.forEach(n => {
-                if (n.nodeType === 1 && n.tagName === 'IFRAME') {
-                    n.addEventListener('load', () => bindIframe(n));
-                    bindIframe(n);
+            m.addedNodes.forEach(node => {
+                if (node.nodeType !== 1) return;
+                if (node.id === 'select_duree') {
+                    ensureMaxAP(node);
+                } else {
+                    const found = node.querySelector && node.querySelector('#select_duree');
+                    if (found) ensureMaxAP(found);
                 }
             });
         });
     });
-    ifObs.observe(document.body, { childList: true, subtree: true });
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    // Initial check
+    const existing = document.querySelector('#select_duree');
+    if (existing) ensureMaxAP(existing);
+})();
+
+
 })();
