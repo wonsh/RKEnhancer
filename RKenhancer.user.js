@@ -819,28 +819,42 @@
         return 5;
     }
 
-    function ensureMaxAP(select) {
-        if (!select) return;
-        const firstOption = select.options[0];
-        if (!firstOption) return;
+function ensureMaxAP(select) {
+    if (!select) return;
+    const firstOption = select.options[0];
+    if (!firstOption) return;
 
-        const baseMinutes = parseInt(firstOption.value, 10);
-        if (!Number.isFinite(baseMinutes) || baseMinutes <= 0) return;
-
-        const baseAP = detectBaseAP();
-        const minutesPerAP = baseMinutes / baseAP;
-        const totalMinutes = Math.round(minutesPerAP * MAX_AP);
-        const label = `${formatMinutes(totalMinutes)} (${MAX_AP} AP)`;
-
-        let opt = select.querySelector('option[data-ap115="1"]');
-        if (!opt) {
-            opt = document.createElement('option');
-            opt.setAttribute('data-ap115', '1');
-            select.appendChild(opt);
-        }
-        opt.value = String(totalMinutes);
-        opt.textContent = label;
+    // Detect base AP from DOM
+    let baseAP = 5; // default
+    const detailsGains = document.querySelector('.details_gains');
+    if (detailsGains?.querySelector('.bloc_gain_lot img')) {
+        baseAP = 10;
     }
+
+    const baseMinutes = parseInt(firstOption.value, 10);
+    if (!Number.isFinite(baseMinutes) || baseMinutes <= 0) return;
+
+    const minutesPerAP = baseMinutes / baseAP;
+    const totalMinutes = Math.round(minutesPerAP * 115); // max AP
+    const label = `${formatMinutes(totalMinutes)} (115 AP)`;
+
+    // Add or update our 115 AP option
+    let opt = select.querySelector('option[data-ap115="1"]');
+    if (!opt) {
+        opt = document.createElement('option');
+        opt.setAttribute('data-ap115', '1');
+        select.appendChild(opt);
+    }
+    opt.value = String(totalMinutes);
+    opt.textContent = label;
+
+    // Observe future changes in this select
+    if (!select._ap115Observed) {
+        const selObs = new MutationObserver(() => ensureMaxAP(select));
+        selObs.observe(select, { childList: true });
+        select._ap115Observed = true;
+    }
+}
 
     // Watch for new #select_duree
     const mo = new MutationObserver(muts => {
