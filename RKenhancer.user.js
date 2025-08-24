@@ -825,17 +825,11 @@ function ensureMaxAP(select) {
     if (!firstOption) return;
 
     // Detect base AP from DOM
-    let baseAP = 5; // default
-    const detailsGains = document.querySelector('.details_gains');
-    if (detailsGains?.querySelector('.bloc_gain_lot img')) {
-        baseAP = 10;
-    }
-
+    const firstOption = select.options[0];
     const baseMinutes = parseInt(firstOption.value, 10);
-    if (!Number.isFinite(baseMinutes) || baseMinutes <= 0) return;
-
+    const baseAP = detectBaseAP(select); // 5 or 10 depending on .details_gains
     const minutesPerAP = baseMinutes / baseAP;
-    const totalMinutes = Math.round(minutesPerAP * 115); // max AP
+    const totalMinutes = Math.round(minutesPerAP * MAX_AP);
     const label = `${formatMinutes(totalMinutes)} (115 AP)`;
 
     // Add or update our 115 AP option
