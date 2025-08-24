@@ -825,7 +825,7 @@ function ensureMaxAP(select) {
     if (!firstOption) return;
 
     // Detect base AP from DOM
-    const firstOption = select.options[0];
+
     const baseMinutes = parseInt(firstOption.value, 10);
     const baseAP = detectBaseAP(select); // 5 or 10 depending on .details_gains
     const minutesPerAP = baseMinutes / baseAP;
