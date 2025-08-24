@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.2
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
@@ -797,11 +797,10 @@
         App.init();
     }
 
-// ============ ADD MAX AP OPTION TO DURATION SELECT (dynamic) ============
+// ============ ADD MAX AP OPTION TO DURATION SELECT (dynamic, 5AP or 10AP base) ============
 
 (function maxApOptionEnhancer() {
     const MAX_AP = 115;
-    const BASE_AP = 5;
 
     function formatMinutes(mins) {
         const h = Math.floor(mins / 60);
@@ -809,6 +808,15 @@
         if (h > 0 && m > 0) return `${h}H ${m}min`;
         if (h > 0) return `${h}H`;
         return `${m}min`;
+    }
+
+    function detectBaseAP(select) {
+        // look for the special item353 image in a .details_gains
+        const popup = select.closest('.details_gains') || document.querySelector('.details_gains');
+        if (popup && popup.querySelector('.bloc_gain_lot img[src*="item353.webp"]')) {
+            return 10;
+        }
+        return 5;
     }
 
     function ensureMaxAP(select) {
@@ -819,9 +827,10 @@
         const baseMinutes = parseInt(firstOption.value, 10);
         if (!Number.isFinite(baseMinutes) || baseMinutes <= 0) return;
 
-        const minutesPerAP = baseMinutes / BASE_AP;
+        const baseAP = detectBaseAP(select);
+        const minutesPerAP = baseMinutes / baseAP;
         const totalMinutes = Math.round(minutesPerAP * MAX_AP);
-        const label = `${formatMinutes(totalMinutes)} (115 AP)`;
+        const label = `${formatMinutes(totalMinutes)} (${MAX_AP} AP)`;
 
         let opt = select.querySelector('option[data-ap115="1"]');
         if (!opt) {
