@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
@@ -796,5 +796,64 @@
     } else {
         App.init();
     }
+
+// ============ ADD MAX AP OPTION TO DURATION SELECT ============
+
+function addMaxAPOption(select) {
+    if (!select || select.dataset.maxApAdded) return;
+
+    const firstOption = select.options[0];
+    if (!firstOption) return;
+
+    const baseMinutes = parseInt(firstOption.value, 10);
+    const baseAP = 5;
+    const maxAP = 115;
+
+    if (!baseMinutes || baseMinutes <= 0) return;
+
+    const minutesPerAP = baseMinutes / baseAP;
+    const totalMinutes = Math.round(minutesPerAP * maxAP);
+
+    function formatMinutes(mins) {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        if (h > 0 && m > 0) return `${h}H ${m}min`;
+        if (h > 0) return `${h}H`;
+        return `${m}min`;
+    }
+
+    const newOption = document.createElement("option");
+    newOption.value = totalMinutes;
+    newOption.textContent = formatMinutes(totalMinutes) + " (115 AP)";
+    select.appendChild(newOption);
+
+    // Mark so we don’t add again
+    select.dataset.maxApAdded = "1";
+}
+
+// Observe DOM for select_duree
+const dureeObserver = new MutationObserver(mutations => {
+    mutations.forEach(m => {
+        m.addedNodes.forEach(node => {
+            if (node.nodeType === 1) {
+                if (node.id === "select_duree") {
+                    addMaxAPOption(node);
+                } else {
+                    const found = node.querySelector?.("#select_duree");
+                    if (found) addMaxAPOption(found);
+                }
+            }
+        });
+    });
+});
+
+dureeObserver.observe(document.body, { childList: true, subtree: true });
+
+// If already present on page load
+const existingSelect = document.querySelector("#select_duree");
+if (existingSelect) addMaxAPOption(existingSelect);
+
+})();
+
 
 })();
