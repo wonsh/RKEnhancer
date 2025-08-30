@@ -173,9 +173,6 @@
             font-size: 0.8em;
             opacity: 0.5;
         }
-        illustration.infoMarche {
-        overflow-y: auto;
-        }
     `;
 
     // ============ SEARCH FUNCTIONALITY ============
@@ -207,22 +204,29 @@
         },
 
         addMarketSearch(doc = document) {
-            const targetElement = doc.querySelector(CONFIG.SELECTORS.MARKET_LEGEND);
-            if (!targetElement || targetElement.parentNode.querySelector('.rk-search-container')) return;
+    const targetElement = doc.querySelector(CONFIG.SELECTORS.MARKET_LEGEND);
+    if (!targetElement || targetElement.parentNode.querySelector('.rk-search-container')) return;
 
-            const { container, input, clearButton } = this.createSearchContainer();
-            targetElement.parentNode.insertBefore(container, targetElement.nextSibling);
+    // 🔹 Add overflow: auto to .illustration.infoMarche
+    const infoMarcheDiv = doc.querySelector('.illustration.infoMarche');
+    if (infoMarcheDiv) {
+        infoMarcheDiv.style.overflow = 'auto';
+    }
 
-            const debouncedFilter = Utils.debounce(() => this.filterMarketTable(doc, input.value), 150);
+    const { container, input, clearButton } = this.createSearchContainer();
+    targetElement.parentNode.insertBefore(container, targetElement.nextSibling);
 
-            input.addEventListener('input', debouncedFilter);
-            input.addEventListener('keyup', debouncedFilter);
-            clearButton.addEventListener('click', () => {
-                input.value = '';
-                this.filterMarketTable(doc, '');
-                input.focus();
-            });
-        },
+    const debouncedFilter = Utils.debounce(() => this.filterMarketTable(doc, input.value), 150);
+
+    input.addEventListener('input', debouncedFilter);
+    input.addEventListener('keyup', debouncedFilter);
+    clearButton.addEventListener('click', () => {
+        input.value = '';
+        this.filterMarketTable(doc, '');
+        input.focus();
+    });
+},
+
 
         filterMarketTable(doc, searchTerm) {
             const term = searchTerm.toLowerCase().trim();
