@@ -173,6 +173,9 @@
             font-size: 0.8em;
             opacity: 0.5;
         }
+        illustration.infoMarche {
+        overflow-y: auto;
+        }
     `;
 
     // ============ SEARCH FUNCTIONALITY ============
