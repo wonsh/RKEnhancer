@@ -4,7 +4,7 @@ A Tampermonkey userscript that enhances the [Renaissance Kingdoms](https://www.r
 
 ## Features
 - Search/filter functionality in inventory, property and market
-- Bulk transfer items from inventory to property
+- Bulk transfer items from inventory to property and apartment
 - Add max AP option to mine, gathering and IMW works
 - more to come...
 - 
