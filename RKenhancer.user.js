@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RK Enhanced Inventory Tools
 // @namespace    http://tampermonkey.net/
-// @version      2.4
+// @version      2.5
 // @description  Adds search filters and bulk transfer functionality for RK inventory
 // @author       You
 // @match        https://www.renaissancekingdoms.com/*
@@ -475,6 +475,30 @@
             btn.addEventListener('click', () => this.transferSelectedItems());
             td1.appendChild(btn);
 
+            const transferTypeSelect = Utils.createElement('select', {
+                className: 'bulk-transfer-select',
+                style: 'margin-left: 10px; padding: 2px 5px; border-radius: 4px; font-size: 12px;'
+            });
+
+            const optionPropriete = Utils.createElement('option', {
+                attributes: { value: 'transfererPropriete' },
+                textContent: 'To Property'
+            });
+            const optionAppartement = Utils.createElement('option', {
+                attributes: { value: 'transfererAppartement' },
+                textContent: 'To Apartment'
+            });
+
+            transferTypeSelect.appendChild(optionPropriete);
+            transferTypeSelect.appendChild(optionAppartement);
+            td1.appendChild(transferTypeSelect);
+
+            this.transferDestination = transferTypeSelect.value; // Initialize the destination
+
+            transferTypeSelect.addEventListener('change', (e) => {
+                this.transferDestination = e.target.value;
+            });
+
             const td2 = Utils.createElement('td', { className: 'td_sans' });
             const progress = Utils.createElement('div', {
                 className: 'bulk-transfer-progress',
@@ -565,9 +589,9 @@
                 throw new Error(`Could not extract parameters for item ${itemId}`);
             }
 
-            const params = paramsMatch[1].split(',').map(p => p.trim().replace(/'/g, ''));
+            const params = paramsMatch[1].split(',').map(p => p.trim().replace(/\'/g, ''));
             const url = `https://www.renaissancekingdoms.com/Action.php?action=69&type=${params[2]}&IDParametre=${params[3]}`;
-            const body = `quantite=${params[4] || '1'}&destination=transfererPropriete&submit=OK`;
+            const body = `quantite=${params[4] || '1'}&destination=${this.transferDestination}&submit=OK`;
 
             const response = await Utils.makeHttpRequest({
                 method: 'POST',
